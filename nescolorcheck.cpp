@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <lrtypes.h>
 #include <FL/Fl_Double_Window.H>
 #include <FL/Fl_File_Chooser.H>
@@ -6,12 +5,14 @@
 #include <FL/Fl_PNG_Image.H>
 #include <FL/Fl_Shared_Image.H>
 #include <FL/Fl_Box.H>
+#include <set>
 #include <stdio.h>
 
 struct quad {
-	u8 bytes[64*64*4];
-	u32 i;
+	u8 bytes[8*8*4];
 };
+
+u32 bads;
 
 static void mess(Fl_RGB_Image *img) {
 
@@ -22,11 +23,10 @@ static void mess(Fl_RGB_Image *img) {
 		abort();
 	}
 
-	const u32 numw = img->w() / 64;
-	const u32 numh = img->h() / 64;
-	const u32 numq = numw * numh;
+	const u32 numw = img->w() / 8;
+	const u32 numh = img->h() / 8;
 
-	quad *quads = new quad[numq];
+	quad q;
 	u8 * const ptr = (u8 *) img->array;
 
 	// Read them
@@ -35,53 +35,40 @@ static void mess(Fl_RGB_Image *img) {
 	i = 0;
 	for (y = 0; y < numh; y++) {
 		for (x = 0; x < numw; x++, i++) {
-			u32 r;
-			for (r = 0; r < 64; r++) {
+			u32 r, c;
+			for (r = 0; r < 8; r++) {
 				// Copy row r
-				memcpy(&quads[i].bytes[r * 64 * depth],
-					&ptr[(y * 64 + r) * pixelrow +
-						x * 64 * depth],
-					64 * depth);
+				memcpy(&q.bytes[r * 8 * depth],
+					&ptr[(y * 8 + r) * pixelrow +
+						x * 8 * depth],
+					8 * depth);
 			}
-			quads[i].i = i;
-		}
-	}
 
-	u8 *ok = new u8[numq];
-	memset(ok, 0, numq);
-
-	// Color each unique quad red
-	for (i = 1; i < numq; i++) {
-		if (memcmp(quads[i - 1].bytes, quads[i].bytes, 64*64*depth) == 0) {
-			ok[i - 1] = 1;
-			ok[i] = 1;
-		}
-	}
-
-	for (i = 0; i < numq; i++) {
-		if (ok[i])
-			continue;
-
-		printf("quad %u not unique\n", quads[i].i);
-
-		y = quads[i].i / numw;
-		x = quads[i].i % numw;
-
-		u8 *modi = ptr + y * pixelrow * 64 +
-					x * 64 * depth;
-
-		u32 c;
-		for (c = 0; c < 64; c++) {
-			u32 p;
-			for (p = 0; p < 64; p++) {
-				modi[p * depth] = 192;
+			// Check
+			std::set<u32> pixels;
+			for (r = 0; r < 64; r++) {
+				u32 p = 0;
+				memcpy(&p, &q.bytes[r * depth], depth);
+				pixels.insert(p);
 			}
-			modi += pixelrow;
+
+			if (pixels.size() > 4) {
+				printf("Bad tile at %u, %u\n", x, y);
+				bads++;
+
+				for (r = 0; r < 8; r++) {
+					// Paint row r
+					u8 * const row = &ptr[(y * 8 + r) * pixelrow +
+							x * 8 * depth];
+					for (c = 0; c < 8; c++) {
+						row[c * depth] = 224;
+					}
+				}
+			}
 		}
 	}
 
-	delete [] ok;
-	delete [] quads;
+	printf("\n%u bad tiles\n", bads);
 }
 
 int main(int argc, char **argv) {
@@ -102,7 +89,10 @@ int main(int argc, char **argv) {
 
 	mess(&orig);
 
-	Fl_Double_Window win(orig.w(), orig.h(), "NES tile color check");
+	char titlebuf[160];
+	sprintf(titlebuf, "NES tile color check, %u bad tiles", bads);
+
+	Fl_Double_Window win(orig.w(), orig.h(), titlebuf);
 
 	Fl_Box box(0, 0, orig.w(), orig.h());
 
